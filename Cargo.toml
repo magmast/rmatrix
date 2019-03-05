@@ -1,0 +1,7 @@
+[package]
+name = "rmatrix"
+version = "0.1.0"
+authors = ["maciej"]
+edition = "2018"
+
+[dependencies]
