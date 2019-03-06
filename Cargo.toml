@@ -5,3 +5,5 @@ authors = ["maciej"]
 edition = "2018"
 
 [dependencies]
+ncurses = "5.99"
+rand = "0.6"
