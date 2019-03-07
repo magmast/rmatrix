@@ -1,105 +1,215 @@
 use std::thread;
 use std::time::Duration;
-use rand::prelude::*;
+use ncurses::{self as nc, WINDOW};
 use rand::distributions::Alphanumeric;
+use rand::prelude::*;
 
+const MIN_X: i32 = 0;
+const MIN_LINE_HEIGHT: i32 = 3;
+const MAYBE_CHANCE: i32 = 5;
+const DEFAULT_OFFSET: i32 = 0;
+const DEFAULT_HEIGHT: i32 = 0;
+const COLUMN_STEP: usize = 2;
+const MIN_LINES_GAP: i32 = 4;
+const GREEN: i16 = 1;
+const LIGHT_GREEN: i16 = 2;
+const FPS: u64 = 20;
+
+#[derive(Clone)]
 pub struct Line {
-    chars: String,
+    offset: i32,
     height: i32,
-    y: i32,
+    content: String,
 }
 
 impl Line {
-    /// Creates random `Line` that doesn't start at y, but ends there.
-    pub fn random_moved(y: i32, max_y: i32) -> Self {
-        let height = thread_rng().gen_range(5, max_y);
+    pub fn new() -> Self {
         Line{
-            height,
-            chars: thread_rng().sample_iter(&Alphanumeric).take(max_y as usize).collect(),
-            y: y - height,
+            offset: DEFAULT_OFFSET,
+            height: DEFAULT_HEIGHT,
+            content: String::new(),
         }
     }
 
-    pub fn visible_chars<'a>(&'a self) -> impl Iterator<Item = (i32, char)> + 'a {
-        let line_y = self.y;
-        let height = self.height;
+    pub fn with_random_height(mut self, max_height: i32) -> Self {
+        self.height = thread_rng().gen_range(MIN_LINE_HEIGHT, max_height);
+        self.offset -= self.height;
+        self
+    }
 
-        self.chars
-            .chars()
-            .enumerate()
+    pub fn with_random_content(mut self, length: usize) -> Self {
+        self.content = thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(length)
+            .collect();
+        self
+    }
+
+    pub fn maybe(self) -> Option<Self> {
+        if thread_rng().gen_range(0, 100) < MAYBE_CHANCE {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    pub fn increment_offset(&mut self) {
+        self.offset += 1;
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.content.len() as i32 > self.offset
+    }
+
+    pub fn print_at(&self, window: WINDOW, x: i32) {
+        for (y, ch) in self.visible_content() {
+            let color = if y == self.offset + self.height - 1 {
+                LIGHT_GREEN
+            } else {
+                GREEN
+            };
+            nc::attron(nc::COLOR_PAIR(color));
+            nc::mvwaddch(window, y, x, ch as u32);
+            nc::attroff(nc::COLOR_PAIR(color));
+        }
+    }
+
+    fn visible_content(&self) -> Vec<(i32, char)> {
+        self.content
+            .char_indices()
             .map(|(y, ch)| (y as i32, ch))
-            .filter(move |(y, _)| *y >= line_y)
-            .filter(move |(y, _)| *y < line_y + height)
+            .filter(|(y, _)| *y >= self.offset)
+            .filter(|(y, _)| *y < self.offset + self.height)
+            .collect()
+    }
+
+    fn offset(&self) -> i32 {
+        self.offset
+    }
+}
+
+pub struct Column {
+    lines: Vec<Line>,
+    height: i32,
+}
+
+impl Column {
+    pub fn new(height: i32) -> Self {
+        let lines = if let Some(line) = Line::new().maybe() {
+            let line = line
+                .with_random_content(height as usize)
+                .with_random_height(height);
+            vec![line]
+        } else {
+            Vec::new()
+        };
+
+        Self{lines, height}
+    }
+
+    pub fn move_lines(&mut self) {
+        for line in self.lines.iter_mut() {
+            line.increment_offset();
+        }
+    }
+
+    pub fn remove_invisible_lines(&mut self) {
+        self.lines = self.lines
+            .iter()
+            .filter(|line| line.is_visible())
+            .map(|line| line.clone())
+            .collect();
+    }
+
+    pub fn generate_line(&mut self) {
+        if let Some(line) = Line::new().maybe() {
+            if self.lines.iter().any(|line| line.offset() < MIN_LINES_GAP) {
+                return
+            }
+            let line = line
+                .with_random_content(self.height as usize)
+                .with_random_height(self.height);
+            self.lines.push(line);
+        }
+    }
+
+    pub fn print_at(&self, window: WINDOW, x: i32) {
+        for line in self.lines.iter() {
+            line.print_at(window, x);
+        }
+    }
+}
+
+pub struct Matrix {
+    window: WINDOW,
+    columns: Vec<Column>,
+}
+
+impl Matrix {
+    pub fn new(window: WINDOW) -> Self {
+        let max_x = nc::getmaxx(window);
+        let max_y = nc::getmaxy(window);
+
+        let columns = (MIN_X..max_x)
+            .step_by(COLUMN_STEP)
+            .map(|_| Column::new(max_y))
+            .collect();
+
+        Self{window, columns}
+    }
+
+    pub fn run(&mut self) {
+        loop {
+            nc::attron(nc::COLOR_PAIR(GREEN));
+            nc::werase(self.window);
+            nc::attroff(nc::COLOR_PAIR(GREEN));
+            self.print();
+            self.update();
+            nc::wrefresh(self.window);
+            thread::sleep(Duration::from_millis(1000 / FPS));
+        }
+    }
+
+    fn update(&mut self) {
+        self.move_lines();
+        self.generate_lines();
+        self.remove_invisible_lines();
+    }
+
+    fn move_lines(&mut self) {
+        for column in self.columns.iter_mut() {
+            column.move_lines();
+        }
+    }
+
+    fn remove_invisible_lines(&mut self) {
+        for column in self.columns.iter_mut() {
+            column.remove_invisible_lines();
+        }
+    }
+
+    fn generate_lines(&mut self) {
+        for column in self.columns.iter_mut() {
+            column.generate_line();
+        }
+    }
+
+    fn print(&self) {
+        let max_x = nc::getmaxx(self.window);
+        let columns = (MIN_X..max_x)
+            .step_by(COLUMN_STEP)
+            .zip(&self.columns);
+        for (x, column) in columns {
+            column.print_at(self.window, x);
+        }
     }
 }
 
 fn main() {
-    let root = ncurses::initscr();
-
-    let height = ncurses::getmaxy(root);
-    let width = ncurses::getmaxx(root);
-
-    let mut columns = (0..width)
-        .step_by(2)
-        .map(|x| {
-            if thread_rng().gen_range(0, 100) > 70 {
-                let line = Line::random_moved(0, height);
-                (x, vec![line])
-            } else {
-                (x, Vec::new())
-            }
-        })
-        .collect::<Vec<(i32, Vec<Line>)>>();
-
-    loop {
-        ncurses::erase();
-
-        columns = columns.into_iter()
-            .map(|(x, column)| {
-                let column = column
-                    .into_iter()
-                    .map(|mut line| {
-                        line.y += 1;
-                        line
-                    });
-                (x, column)
-            })
-            .map(|(x, column)| (x, column.filter(|line| line.y < height)))
-            .map(|(x, column)| (x, column.collect()))
-            .map(|(x, mut column): (i32, Vec<Line>)| {
-                match column.last() {
-                    Some(line) if line.y > 3 => {
-                        if thread_rng().gen_range(0, 100) > 60 {
-                            let line = Line::random_moved(0, height);
-                            column.push(line);
-                        }
-                    },
-                    None => {
-                        if thread_rng().gen_range(0, 100) > 65 {
-                            let line = Line::random_moved(0, height);
-                            column.push(line);
-                        }
-                    },
-                    _ => {}
-                }
-
-                (x, column)
-            })
-            .collect();
-
-        columns.iter()
-            .for_each(|(x, column)| {
-                column
-                    .iter()
-                    .for_each(|line| {
-                        line.visible_chars()
-                            .for_each(|(y, ch)| {
-                                ncurses::mvaddch(y as i32, *x, ch as u32);
-                            });
-                    })
-            });
-
-        ncurses::refresh();
-        thread::sleep(Duration::from_millis(50));
-    }
+    let root = nc::initscr();
+    nc::start_color();
+    nc::init_pair(GREEN, nc::COLOR_GREEN, nc::COLOR_BLACK);
+    nc::init_pair(LIGHT_GREEN, nc::COLOR_WHITE, nc::COLOR_BLACK);
+    Matrix::new(root).run();
+    nc::endwin();
 }
