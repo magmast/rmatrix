@@ -5,7 +5,7 @@
 
 Matrix like animation running in terminal.
 
-![](example.git)
+![](example.gif)
 
 ## Installation
 
