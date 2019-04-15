@@ -5,12 +5,23 @@
 
 Matrix like animation running in terminal.
 
+![](example.git)
+
 ## Installation
 
-You can install rmatrix with Cargo using one simple command:
+You can install rmatrix via Cargo with just one command:
 
 ```sh
 cargo install rmatrix
 ```
 
 ## Usage
+
+When you feel that you need to see random characters on your screen just run:
+
+```sh
+rmatrix
+```
+
+## License
+This project is licensed under the MIT License - see the LICENSE.md file for details

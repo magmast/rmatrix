@@ -8,7 +8,7 @@ repository = "https://github.com/magmast/rmatrix"
 readme = "README.md"
 keywords = ["ncurses", "matrix"]
 license = "MIT"
-license-file = "LICENSE"
+license-file = "LICENSE.md"
 
 [badges]
 travis-ci = { repository = "magmast/rmatrix" }
