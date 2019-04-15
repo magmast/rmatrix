@@ -1,0 +1,7 @@
+language: rust
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)
+
+env:
+  - CODECOV_TOKEN="a167ab40-ee69-415b-9f84-62eb19c5868f"
