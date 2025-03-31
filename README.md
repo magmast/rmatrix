@@ -1,11 +1,12 @@
 # RMatrix
+
 > The matrix in Rust.
 
 [![Build Status](https://travis-ci.org/magmast/rmatrix.svg?branch=master)](https://travis-ci.org/magmast/rmatrix)
 
 Matrix like animation running in terminal.
 
-![](example.gif)
+![GIF with rmatrix running](example.gif)
 
 ## Installation
 
@@ -24,4 +25,5 @@ rmatrix
 ```
 
 ## License
-This project is licensed under the MIT License - see the LICENSE.md file for details
+
+This project is licensed under the MIT License - see the [LICENSE file](LICENSE) for details

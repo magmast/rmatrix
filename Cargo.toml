@@ -2,16 +2,13 @@
 name = "rmatrix"
 version = "0.1.1"
 authors = ["Maciej Augustyniak"]
-edition = "2018"
-description = "Matrix like animation running in terminal."
+edition = "2024"
+description = "Matrix like animation running in terminal"
 repository = "https://github.com/magmast/rmatrix"
-readme = "README.md"
 keywords = ["ncurses", "matrix"]
 license = "MIT"
-license-file = "LICENSE.md"
 
 [badges]
-travis-ci = { repository = "magmast/rmatrix" }
 codecov = { repository = "magmast/rmatrix" }
 maintenance = { status = "passively-maintained" }
 
