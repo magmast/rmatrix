@@ -1,194 +1,308 @@
-use std::{thread, time::Duration};
+use std::{
+    mem,
+    ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
+};
 
-use ncurses as nc;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use bon::bon;
+use rand::{
+    Rng,
+    distr::{Alphanumeric, Distribution},
+};
 
-const FPS: u64 = 20;
-const MIN_X: i32 = 0;
-const MIN_LINE_HEIGHT: i32 = 3;
-const MAYBE_CHANCE: i32 = 5;
-const COLUMN_STEP: usize = 2;
-const MIN_LINES_GAP: i32 = 4;
-const GREEN: i16 = 1;
-const LIGHT_GREEN: i16 = 2;
+pub mod app;
+pub mod term;
 
-pub struct Matrix {
-    window: nc::WINDOW,
-    columns: Vec<Column>,
+#[derive(Debug)]
+pub struct Matrix<R: Rng> {
+    descriptor: MatrixDescriptor,
+    gap: u16,
+    rng: R,
+    cols: Vec<Column>,
 }
 
-impl Matrix {
-    pub fn new(window: nc::WINDOW) -> Self {
-        let max_x = nc::getmaxx(window);
-        let max_y = nc::getmaxy(window);
+#[bon]
+impl<R: Rng> Matrix<R> {
+    #[builder]
+    pub fn new(
+        mut rng: R,
+        #[builder(default = 80)] width: u16,
+        #[builder(default = 24)] height: u16,
+        #[builder(default = 1)] gap: u16,
+        #[builder(into, default = SequenceHeightBounds::RangeFull)]
+        sequence_height_bounds: SequenceHeightBounds,
+        #[builder(default = 0.05)] sequence_probability: f64,
+    ) -> Self {
+        let descriptor = MatrixDescriptor {
+            width,
+            height,
+            sequence_height_bounds,
+            sequence_probability,
+        };
 
-        let columns = (MIN_X..max_x)
-            .step_by(COLUMN_STEP)
-            .map(|_| Column::new(max_y))
+        let cols: Vec<_> = (0..width)
+            .step_by(usize::from(gap) + 1)
+            .map(|x| Column::new(&mut rng, x, &descriptor))
             .collect();
 
-        Self { window, columns }
+        Self {
+            descriptor,
+            gap,
+            rng,
+            cols,
+        }
     }
 
-    pub fn run(&mut self) {
-        loop {
-            nc::attron(nc::COLOR_PAIR(GREEN));
-            nc::werase(self.window);
-            nc::attroff(nc::COLOR_PAIR(GREEN));
-            self.print();
-            self.update();
-            nc::wrefresh(self.window);
-            thread::sleep(Duration::from_millis(1000 / FPS));
+    pub fn update(&mut self) {
+        for col in &mut self.cols {
+            col.update(&mut self.rng, &self.descriptor);
+        }
+    }
+
+    pub fn chars(&self) -> impl Iterator<Item = ([u16; 2], CharType, char)> {
+        self.cols.iter().flat_map(|col| col.chars())
+    }
+
+    pub fn resize(&mut self, width: u16, height: u16) {
+        let prev_width = self.descriptor.height;
+
+        self.descriptor.width = width;
+        self.descriptor.height = height;
+
+        self.cols = mem::take(&mut self.cols)
+            .into_iter()
+            .filter(|col| col.x < width)
+            .chain(
+                ((prev_width + 1)..width)
+                    .step_by(usize::from(self.gap))
+                    .map(|x| Column::new(&mut self.rng, x, &self.descriptor)),
+            )
+            .collect();
+    }
+}
+
+#[derive(Debug)]
+struct MatrixDescriptor {
+    #[allow(unused)]
+    width: u16,
+    height: u16,
+    sequence_height_bounds: SequenceHeightBounds,
+    sequence_probability: f64,
+}
+
+#[derive(Debug)]
+struct Column {
+    x: u16,
+    seqs: Vec<Sequence>,
+}
+
+impl Column {
+    fn new(mut rng: impl Rng, x: u16, descriptor: &MatrixDescriptor) -> Self {
+        Self {
+            x,
+            seqs: rng
+                .random_bool(descriptor.sequence_probability)
+                .then(|| Sequence::new(rng, descriptor))
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    fn update(&mut self, mut rng: impl Rng, descriptor: &MatrixDescriptor) {
+        self.seqs = mem::take(&mut self.seqs)
+            .into_iter()
+            .map(|mut seq| {
+                seq.update();
+                seq
+            })
+            .filter(|seq| seq.offset <= i32::from(descriptor.height))
+            .chain(
+                (self.seqs.iter().all(|seq| seq.offset > 0)
+                    && rng.random_bool(descriptor.sequence_probability))
+                .then(|| Sequence::new(rng, descriptor)),
+            )
+            .collect();
+    }
+
+    fn chars(&self) -> impl Iterator<Item = ([u16; 2], CharType, char)> {
+        self.seqs
+            .iter()
+            .flat_map(|seq| seq.chars().map(|(y, ty, ch)| ([self.x, y], ty, ch)))
+    }
+}
+
+#[derive(Debug)]
+struct Sequence {
+    offset: i32,
+    height: u16,
+    chars: Vec<char>,
+}
+
+impl Sequence {
+    fn new(mut rng: impl Rng, descriptor: &MatrixDescriptor) -> Self {
+        let chars = Alphanumeric
+            .sample_iter(&mut rng)
+            .take(usize::from(descriptor.height))
+            .map(char::from)
+            .collect();
+
+        let height = descriptor
+            .sequence_height_bounds
+            .sample(&mut rng, descriptor.height);
+
+        Sequence {
+            offset: -i32::from(height),
+            height,
+            chars,
         }
     }
 
     fn update(&mut self) {
-        self.move_lines();
-        self.generate_lines();
-        self.remove_invisible_lines();
-    }
-
-    fn move_lines(&mut self) {
-        for column in self.columns.iter_mut() {
-            column.move_lines();
-        }
-    }
-
-    fn remove_invisible_lines(&mut self) {
-        for column in self.columns.iter_mut() {
-            column.remove_invisible_lines();
-        }
-    }
-
-    fn generate_lines(&mut self) {
-        for column in self.columns.iter_mut() {
-            column.generate_line();
-        }
-    }
-
-    fn print(&self) {
-        let max_x = nc::getmaxx(self.window);
-        let columns = (MIN_X..max_x).step_by(COLUMN_STEP).zip(&self.columns);
-        for (x, column) in columns {
-            column.print_at(self.window, x);
-        }
-    }
-}
-
-pub struct Column {
-    lines: Vec<Sequence>,
-    height: i32,
-}
-
-impl Column {
-    pub fn new(height: i32) -> Self {
-        let lines = if let Some(line) = Sequence::default().maybe() {
-            let line = line
-                .with_random_content(height as usize)
-                .with_random_height(height);
-            vec![line]
-        } else {
-            Vec::new()
-        };
-
-        Self { lines, height }
-    }
-
-    pub fn move_lines(&mut self) {
-        for line in self.lines.iter_mut() {
-            line.increment_offset();
-        }
-    }
-
-    pub fn remove_invisible_lines(&mut self) {
-        self.lines = self
-            .lines
-            .iter()
-            .filter(|line| line.is_visible())
-            .cloned()
-            .collect();
-    }
-
-    pub fn generate_line(&mut self) {
-        if let Some(line) = Sequence::default().maybe() {
-            if self.lines.iter().any(|line| line.offset() < MIN_LINES_GAP) {
-                return;
-            }
-            let line = line
-                .with_random_content(self.height as usize)
-                .with_random_height(self.height);
-            self.lines.push(line);
-        }
-    }
-
-    pub fn print_at(&self, window: nc::WINDOW, x: i32) {
-        for line in self.lines.iter() {
-            line.print_at(window, x);
-        }
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct Sequence {
-    offset: i32,
-    height: i32,
-    content: String,
-}
-
-impl Sequence {
-    pub fn with_random_height(mut self, max_height: i32) -> Self {
-        self.height = thread_rng().gen_range(MIN_LINE_HEIGHT, max_height);
-        self.offset -= self.height;
-        self
-    }
-
-    pub fn with_random_content(mut self, length: usize) -> Self {
-        self.content = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(length)
-            .collect();
-        self
-    }
-
-    pub fn maybe(self) -> Option<Self> {
-        if thread_rng().gen_range(0, 100) < MAYBE_CHANCE {
-            Some(self)
-        } else {
-            None
-        }
-    }
-
-    pub fn increment_offset(&mut self) {
         self.offset += 1;
     }
 
-    pub fn is_visible(&self) -> bool {
-        self.content.len() as i32 > self.offset
-    }
+    fn chars(&self) -> impl Iterator<Item = (u16, CharType, char)> {
+        let last_visible_y = self.offset + i32::from(self.height) - 1;
 
-    pub fn print_at(&self, window: nc::WINDOW, x: i32) {
-        for (y, ch) in self.visible_content() {
-            let color = if y == self.offset + self.height - 1 {
-                LIGHT_GREEN
-            } else {
-                GREEN
-            };
-            nc::attron(nc::COLOR_PAIR(color));
-            nc::mvwaddch(window, y, x, ch as u32);
-            nc::attroff(nc::COLOR_PAIR(color));
+        (self.offset..(self.offset + i32::from(self.height)))
+            .filter(|&y| y >= 0 && (y as usize) < self.chars.len())
+            .map(move |y| {
+                (
+                    y as u16,
+                    if y == last_visible_y {
+                        CharType::Head
+                    } else {
+                        CharType::Tail
+                    },
+                    self.chars[y as usize],
+                )
+            })
+    }
+}
+
+#[derive(Debug)]
+pub enum SequenceHeightBounds {
+    Range(Range<u16>),
+    RangeInclusive(RangeInclusive<u16>),
+    RangeFrom(RangeFrom<u16>),
+    RangeTo(RangeTo<u16>),
+    RangeToInclusive(RangeToInclusive<u16>),
+    RangeFull,
+}
+
+impl SequenceHeightBounds {
+    fn sample(&self, mut rng: impl Rng, max_height: u16) -> u16 {
+        match self {
+            Self::Range(range) => rng.random_range(range.clone()),
+            Self::RangeInclusive(range) => rng.random_range(range.clone()),
+            Self::RangeFrom(range) => rng.random_range(range.start..max_height),
+            Self::RangeTo(range) => rng.random_range(0..range.end),
+            Self::RangeToInclusive(range) => rng.random_range(0..=range.end),
+            Self::RangeFull => rng.random_range(0..max_height),
         }
     }
+}
 
-    fn visible_content(&self) -> Vec<(i32, char)> {
-        self.content
-            .char_indices()
-            .map(|(y, ch)| (y as i32, ch))
-            .filter(|(y, _)| *y >= self.offset)
-            .filter(|(y, _)| *y < self.offset + self.height)
-            .collect()
+impl From<Range<u16>> for SequenceHeightBounds {
+    fn from(range: Range<u16>) -> Self {
+        Self::Range(range)
     }
+}
 
-    fn offset(&self) -> i32 {
-        self.offset
+impl From<RangeInclusive<u16>> for SequenceHeightBounds {
+    fn from(range: RangeInclusive<u16>) -> Self {
+        Self::RangeInclusive(range)
+    }
+}
+
+impl From<RangeFrom<u16>> for SequenceHeightBounds {
+    fn from(range: RangeFrom<u16>) -> Self {
+        Self::RangeFrom(range)
+    }
+}
+
+impl From<RangeTo<u16>> for SequenceHeightBounds {
+    fn from(range: RangeTo<u16>) -> Self {
+        Self::RangeTo(range)
+    }
+}
+
+impl From<RangeToInclusive<u16>> for SequenceHeightBounds {
+    fn from(range: RangeToInclusive<u16>) -> Self {
+        Self::RangeToInclusive(range)
+    }
+}
+
+impl From<RangeFull> for SequenceHeightBounds {
+    fn from(_: RangeFull) -> Self {
+        Self::RangeFull
+    }
+}
+
+/// Describes where the character is in the sequence.
+#[derive(Debug, Hash, PartialEq, Eq)]
+pub enum CharType {
+    /// Character the most bottom character in the sequence.
+    Head,
+
+    /// Character isn't [`CharType::Head`].
+    Tail,
+}
+
+#[cfg(test)]
+mod tests {
+    mod sequence {
+        use crate::{MatrixDescriptor, Sequence, SequenceHeightBounds};
+
+        #[test]
+        fn test_samples_correct_number_of_chars() {
+            const HEIGHTS: &[u16] = &[10, 16, 24, u16::MAX];
+
+            let mut rng = rand::rng();
+            for height in HEIGHTS.iter().copied() {
+                let sequence = Sequence::new(
+                    &mut rng,
+                    &MatrixDescriptor {
+                        width: 80,
+                        height,
+                        sequence_height_bounds: SequenceHeightBounds::RangeFull,
+                        sequence_probability: 1.0,
+                    },
+                );
+                assert_eq!(sequence.chars.len(), usize::from(height));
+            }
+        }
+
+        #[test]
+        fn test_starts_above_the_matrix() {
+            let mut rng = rand::rng();
+
+            let sequence = Sequence::new(
+                &mut rng,
+                &MatrixDescriptor {
+                    width: 80,
+                    height: 24,
+                    sequence_height_bounds: (5..6).into(),
+                    sequence_probability: 1.0,
+                },
+            );
+
+            assert_eq!(sequence.offset, -5);
+        }
+
+        #[test]
+        fn test_has_no_chars_when_above_the_matrix() {
+            let mut rng = rand::rng();
+
+            let descriptor = MatrixDescriptor {
+                width: 80,
+                height: 24,
+                sequence_height_bounds: (5..16).into(),
+                sequence_probability: 1.0,
+            };
+
+            let sequence = Sequence::new(&mut rng, &descriptor);
+
+            assert_eq!(sequence.chars().count(), 0);
+        }
     }
 }
