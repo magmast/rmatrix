@@ -6,7 +6,6 @@ use std::{
 
 use bon::bon;
 use crossterm::{
-    QueueableCommand,
     cursor::{Hide, MoveTo, Show},
     event::{
         self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -18,7 +17,7 @@ use crossterm::{
     tty::IsTty,
 };
 use rand::Rng;
-use tracing::{error, trace};
+use tracing::error;
 
 use crate::{CharType, Matrix, app::Speed};
 
@@ -53,6 +52,7 @@ pub struct CrosstermTerminal<'a> {
     stdout: StdoutLock<'a>,
     head_color: Color,
     tail_color: Color,
+    previous_state: HashMap<[u16; 2], (CharType, char)>,
 }
 
 #[bon]
@@ -71,6 +71,7 @@ impl<'a> CrosstermTerminal<'a> {
 
         execute!(
             stdout,
+            Clear(ClearType::All),
             Hide,
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::all())
         )?;
@@ -79,37 +80,62 @@ impl<'a> CrosstermTerminal<'a> {
             stdout,
             head_color,
             tail_color,
+            previous_state: HashMap::new(),
         })
     }
 
     pub fn render<R: Rng>(&mut self, matrix: &Matrix<R>) -> io::Result<()> {
-        let by_type = matrix.chars().fold(
-            HashMap::<CharType, Vec<([u16; 2], char)>>::new(),
-            |mut acc, (coords, ty, ch)| {
-                acc.entry(ty)
-                    .and_modify(|entry| {
-                        entry.push((coords, ch));
-                    })
-                    .or_insert_with(|| vec![(coords, ch)]);
-                acc
-            },
-        );
-        trace!(groups =? by_type, "Grouped matrix characters by type");
+        let current_state: HashMap<_, _> = matrix
+            .chars()
+            .map(|(coords, ty, ch)| (coords, (ty, ch)))
+            .collect();
 
-        self.stdout.queue(Clear(ClearType::All))?;
+        self.render_update(&current_state)?;
+        self.render_clear(&current_state)?;
+        self.stdout.flush()?;
 
-        for (ty, chs) in by_type {
-            self.stdout.queue(SetForegroundColor(match ty {
-                CharType::Head => self.head_color,
-                CharType::Tail => self.tail_color,
-            }))?;
+        self.previous_state = current_state;
 
-            for ([x, y], ch) in chs {
-                trace!(?ty, x, y, "Queueing character rendering: {}", ch);
-                queue!(self.stdout, MoveTo(x, y), Print(ch))?;
+        Ok(())
+    }
+
+    /// Renders new or updated characters.
+    fn render_update(
+        &mut self,
+        current_state: &HashMap<[u16; 2], (CharType, char)>,
+    ) -> io::Result<()> {
+        for (coords, (ty, ch)) in current_state {
+            let should_update = match self.previous_state.get(coords) {
+                Some((prev_ty, prev_ch)) => prev_ty != ty || prev_ch != ch,
+                None => true,
+            };
+            if !should_update {
+                continue;
             }
 
-            self.stdout.flush()?;
+            queue!(
+                self.stdout,
+                MoveTo(coords[0], coords[1]),
+                SetForegroundColor(match ty {
+                    CharType::Head => self.head_color,
+                    CharType::Tail => self.tail_color,
+                }),
+                Print(*ch)
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Removes characters that are no longer present in the current state.
+    fn render_clear(
+        &mut self,
+        current_state: &HashMap<[u16; 2], (CharType, char)>,
+    ) -> io::Result<()> {
+        for coords in self.previous_state.keys() {
+            if !current_state.contains_key(coords) {
+                queue!(self.stdout, MoveTo(coords[0], coords[1]), Print(" "))?;
+            }
         }
 
         Ok(())
