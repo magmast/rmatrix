@@ -1,19 +1,23 @@
 use std::{
     fs::{self, File},
     io,
+    path::PathBuf,
 };
 
-use ::time::OffsetDateTime;
 use anyhow::{Context, Result};
+use clap::Parser;
 use directories::ProjectDirs;
-use rmatrix::{app::App, term::CrosstermTerminal};
+use rmatrix::{Cli, app::App, term::CrosstermTerminal};
+use time::OffsetDateTime;
 use tracing::error;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
-    enable_logging().context("Failed to enable logging")?;
+    let cli = Cli::parse();
 
-    if let Err(err) = run() {
+    enable_logging(cli.log_file.as_ref()).context("Failed to enable logging")?;
+
+    if let Err(err) = run(cli) {
         eprintln!("{:?}", err);
         error!("{}", err);
     }
@@ -21,31 +25,36 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run() -> Result<()> {
+fn run(cli: Cli) -> Result<()> {
     App::builder()
         .rng(rand::rng())
         .terminal(
             CrosstermTerminal::builder()
                 .stdout(io::stdout().lock())
+                .maybe_head_color(cli.head_color)
+                .maybe_tail_color(cli.tail_color)
                 .build()
                 .context("Failed to setup the terminal")?,
         )
         .sequence_height_bounds(5..=14)
+        .maybe_speed(cli.speed)
         .build()
         .context("Failed to create the app")?
         .run()
         .context("Failed to run the app")
 }
 
-fn enable_logging() -> Result<()> {
-    let dirs = ProjectDirs::from("app.augustyniak", "magmast", "rmatrix")
-        .context("Failed to get project directories")?;
+fn enable_logging(log_file_path: Option<impl Into<PathBuf>>) -> Result<()> {
+    let log_path = if let Some(path) = log_file_path {
+        path.into()
+    } else {
+        default_log_file_path().context("Failed to get default log file path")?
+    };
 
-    let logs_path = dirs.data_local_dir().join("logs");
-    fs::create_dir_all(&logs_path).context("Failed to create logs directory")?;
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent).context("Failed to create logs directory")?;
+    }
 
-    let now = OffsetDateTime::now_local().context("Failed to get local time")?;
-    let log_path = logs_path.join(format!("{}.log", now));
     let log_file = File::options()
         .append(true)
         .create(true)
@@ -59,4 +68,14 @@ fn enable_logging() -> Result<()> {
         .init();
 
     Ok(())
+}
+
+fn default_log_file_path() -> Result<PathBuf> {
+    let now = OffsetDateTime::now_local().context("Failed to get local time")?;
+    let path = ProjectDirs::from("app.augustyniak", "magmast", "rmatrix")
+        .context("Failed to get project directories")?
+        .data_local_dir()
+        .join("logs")
+        .join(format!("{}.log", now));
+    Ok(path)
 }

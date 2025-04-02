@@ -1,5 +1,6 @@
-use std::{ops::Deref, thread, time::Duration};
+use std::{ops::Deref, str::FromStr, thread, time::Duration};
 
+use anyhow::{Error, anyhow};
 use bon::bon;
 use rand::Rng;
 use tracing::{debug, trace};
@@ -72,19 +73,31 @@ impl<R: Rng, T: Terminal> App<R, T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Speed(u64);
 
 impl Speed {
     pub fn new(speed: u64) -> Self {
-        assert!(speed > 0, "Speed must be greater than 0");
-        assert!(speed <= 9, "Speed must be less than or equal to 9");
+        assert!((0..=9).contains(&speed), "Speed must be between 1 and 9");
 
         Self(speed)
     }
 
     pub fn fps(&self) -> u64 {
         **self * 5
+    }
+}
+
+impl FromStr for Speed {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let val = s.parse::<u64>()?;
+        if (1..=9).contains(&val) {
+            Ok(Self::new(val))
+        } else {
+            Err(anyhow!("Speed must be between 1 and 9"))
+        }
     }
 }
 

@@ -15,11 +15,13 @@ maintenance = { status = "passively-maintained" }
 [dependencies]
 anyhow = "1.0.97"
 bon = "3.5.1"
-crossterm = "0.28.1"
+clap = { version = "4.5.35", features = ["derive"] }
+crossterm = { version = "0.28.1", features = ["serde"] }
 derive_more = { version = "2.0.1", features = ["debug"] }
 directories = "6.0.0"
 ncurses = "5.99"
 rand = "0.9.0"
+serde_plain = "1.0.2"
 time = { version = "0.3.41", features = ["local-offset"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }

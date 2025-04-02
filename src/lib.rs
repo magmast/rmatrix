@@ -1,9 +1,13 @@
 use std::{
     mem,
     ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
+    path::PathBuf,
 };
 
+use app::Speed;
 use bon::bon;
+use clap::Parser;
+use crossterm::style::Color;
 use rand::{
     Rng,
     distr::{Alphanumeric, Distribution},
@@ -305,4 +309,32 @@ mod tests {
             assert_eq!(sequence.chars().count(), 0);
         }
     }
+}
+
+#[derive(Debug, Parser)]
+#[clap(about, version, author)]
+pub struct Cli {
+    #[arg(
+        long,
+        value_parser = parse_color,
+        help = "Color of the first character in a falling sequence"
+    )]
+    pub head_color: Option<Color>,
+
+    #[arg(
+        long,
+        value_parser = parse_color,
+        help = "Color of the tail characters in a falling sequence"
+    )]
+    pub tail_color: Option<Color>,
+
+    #[arg(short, long, help = "Speed of the falling sequences")]
+    pub speed: Option<Speed>,
+
+    #[arg(short, long, help = "Path to a log file")]
+    pub log_file: Option<PathBuf>,
+}
+
+fn parse_color(s: &str) -> Result<Color, serde_plain::Error> {
+    serde_plain::from_str(s)
 }
