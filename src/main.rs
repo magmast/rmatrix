@@ -1,4 +1,7 @@
-use std::fs::{self, File};
+use std::{
+    fs::{self, File},
+    io,
+};
 
 use ::time::OffsetDateTime;
 use anyhow::{Context, Result};
@@ -22,6 +25,7 @@ fn run() -> Result<()> {
         .rng(rand::rng())
         .terminal(
             CrosstermTerminal::builder()
+                .stdout(io::stdout().lock())
                 .build()
                 .context("Failed to setup the terminal")?,
         )

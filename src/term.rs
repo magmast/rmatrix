@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{self, Write},
+    io::{self, StdoutLock, Write},
     time::Duration,
 };
 
@@ -48,30 +48,30 @@ pub enum Event {
     ChangeSpeed(Speed),
 }
 
-pub struct CrosstermTerminal {
-    sink: Box<dyn Write>,
+pub struct CrosstermTerminal<'a> {
+    stdout: StdoutLock<'a>,
     head_color: Color,
     tail_color: Color,
 }
 
 #[bon]
-impl CrosstermTerminal {
+impl<'a> CrosstermTerminal<'a> {
     #[builder]
     pub fn new(
-        #[builder(default = { Box::new(io::stdout()) })] mut sink: Box<dyn Write>,
+        mut stdout: StdoutLock<'a>,
         #[builder(default = DEFAULT_HEAD_COLOR)] head_color: Color,
         #[builder(default = DEFAULT_TAIL_COLOR)] tail_color: Color,
     ) -> io::Result<Self> {
         enable_raw_mode()?;
 
         execute!(
-            sink,
+            stdout,
             Hide,
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::all())
         )?;
 
         Ok(Self {
-            sink,
+            stdout,
             head_color,
             tail_color,
         })
@@ -91,20 +91,20 @@ impl CrosstermTerminal {
         );
         trace!(groups =? by_type, "Grouped matrix characters by type");
 
-        self.sink.queue(Clear(ClearType::All))?;
+        self.stdout.queue(Clear(ClearType::All))?;
 
         for (ty, chs) in by_type {
-            self.sink.queue(SetForegroundColor(match ty {
+            self.stdout.queue(SetForegroundColor(match ty {
                 CharType::Head => self.head_color,
                 CharType::Tail => self.tail_color,
             }))?;
 
             for ([x, y], ch) in chs {
                 trace!(?ty, x, y, "Queueing character rendering: {}", ch);
-                queue!(self.sink, MoveTo(x, y), Print(ch))?;
+                queue!(self.stdout, MoveTo(x, y), Print(ch))?;
             }
 
-            self.sink.flush()?;
+            self.stdout.flush()?;
         }
 
         Ok(())
@@ -146,11 +146,11 @@ impl CrosstermTerminal {
 
     fn restore_terminal(&mut self) -> io::Result<()> {
         terminal::disable_raw_mode()?;
-        execute!(self.sink, Show, PopKeyboardEnhancementFlags)
+        execute!(self.stdout, Show, PopKeyboardEnhancementFlags)
     }
 }
 
-impl Terminal for CrosstermTerminal {
+impl Terminal for CrosstermTerminal<'_> {
     type Error = io::Error;
 
     fn size() -> Result<(u16, u16), Self::Error> {
@@ -163,7 +163,7 @@ impl Terminal for CrosstermTerminal {
     }
 }
 
-impl Drop for CrosstermTerminal {
+impl Drop for CrosstermTerminal<'_> {
     fn drop(&mut self) {
         if let Err(err) = self.restore_terminal() {
             error!("Failed to restore terminal: {}", err);
