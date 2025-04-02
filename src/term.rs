@@ -15,6 +15,7 @@ use crossterm::{
     execute, queue,
     style::{Color, Print, SetForegroundColor},
     terminal::{self, Clear, ClearType, enable_raw_mode},
+    tty::IsTty,
 };
 use rand::Rng;
 use tracing::{error, trace};
@@ -62,6 +63,10 @@ impl<'a> CrosstermTerminal<'a> {
         #[builder(default = DEFAULT_HEAD_COLOR)] head_color: Color,
         #[builder(default = DEFAULT_TAIL_COLOR)] tail_color: Color,
     ) -> io::Result<Self> {
+        if !stdout.is_tty() {
+            return Err(io::Error::new(io::ErrorKind::Other, "stdout is not a TTY"));
+        }
+
         enable_raw_mode()?;
 
         execute!(

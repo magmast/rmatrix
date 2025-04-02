@@ -14,6 +14,7 @@ fn main() -> Result<()> {
     enable_logging().context("Failed to enable logging")?;
 
     if let Err(err) = run() {
+        eprintln!("{:?}", err);
         error!("{}", err);
     }
 
