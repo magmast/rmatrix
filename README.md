@@ -8,6 +8,14 @@ Matrix like animation running in terminal.
 
 ![GIF with rmatrix running](example.gif)
 
+## To Do
+
+- [ ] Show more characters than just ASCII alphanumerics and a cli parameter
+  to change that
+- [ ] Allow modifying sequence and column gaps with cli parameters
+- [ ] Allow modifying sequence height (also rename this to length) through cli
+  parameters
+
 ## Installation
 
 You can install rmatrix via Cargo with just one command:
