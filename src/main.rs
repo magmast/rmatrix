@@ -36,7 +36,7 @@ fn run(cli: Cli) -> Result<()> {
                 .build()
                 .context("Failed to setup the terminal")?,
         )
-        .sequence_height_bounds(5..=14)
+        .sequence_height_bounds(10..=32)
         .maybe_speed(cli.speed)
         .build()
         .context("Failed to create the app")?

@@ -19,6 +19,7 @@ clap = { version = "4.5.35", features = ["derive"] }
 crossterm = { version = "0.28.1", features = ["serde"] }
 derive_more = { version = "2.0.1", features = ["debug"] }
 directories = "6.0.0"
+itertools = "0.14.0"
 ncurses = "5.99"
 rand = "0.9.0"
 serde_plain = "1.0.2"

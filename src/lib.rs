@@ -118,13 +118,14 @@ impl Column {
                 seq.update();
                 seq
             })
-            .filter(|seq| seq.offset <= i32::from(descriptor.height))
-            .chain(
-                (self.seqs.iter().all(|seq| seq.offset > 0)
-                    && rng.random_bool(descriptor.sequence_probability))
-                .then(|| Sequence::new(rng, descriptor)),
-            )
+            .filter(|seq| seq.offset < i32::from(descriptor.height))
             .collect();
+
+        if self.seqs.iter().all(|seq| seq.offset > 1)
+            && rng.random_bool(descriptor.sequence_probability)
+        {
+            self.seqs.push(Sequence::new(rng, descriptor));
+        }
     }
 
     fn chars(&self) -> impl Iterator<Item = ([u16; 2], CharType, char)> {
@@ -255,7 +256,7 @@ pub enum CharType {
 #[cfg(test)]
 mod tests {
     mod sequence {
-        use crate::{MatrixDescriptor, Sequence, SequenceHeightBounds};
+        use crate::{CharType, MatrixDescriptor, Sequence, SequenceHeightBounds};
 
         #[test]
         fn test_samples_correct_number_of_chars() {
@@ -307,6 +308,73 @@ mod tests {
             let sequence = Sequence::new(&mut rng, &descriptor);
 
             assert_eq!(sequence.chars().count(), 0);
+        }
+
+        #[test]
+        fn test_only_last_visible_char_is_head() {
+            let mut rng = rand::rng();
+            let descriptor = MatrixDescriptor {
+                width: 80,
+                height: 24,
+                sequence_height_bounds: (5..6).into(),
+                sequence_probability: 1.0,
+            };
+
+            let mut sequence = Sequence::new(&mut rng, &descriptor);
+
+            // Move sequence partially into view
+            sequence.offset = -2;
+
+            let chars: Vec<_> = sequence.chars().collect();
+
+            // Verify we have the expected number of visible characters
+            assert_eq!(chars.len(), 3);
+
+            // Check that only the last character is Head
+            assert!(
+                chars
+                    .iter()
+                    .take(2)
+                    .all(|(_, ty, _)| matches!(ty, CharType::Tail)),
+                "All characters except last should be Tail"
+            );
+            assert!(
+                matches!(chars.last().unwrap().1, CharType::Head),
+                "Last character should be Head"
+            );
+        }
+    }
+
+    mod column {
+        use std::collections::HashSet;
+
+        use crate::{Column, MatrixDescriptor};
+        use itertools::Itertools;
+        use rand::rngs::mock::StepRng;
+
+        #[test]
+        fn test_sequences_never_overlap() {
+            let mut rng = StepRng::new(0, u64::MAX);
+            let descriptor = MatrixDescriptor {
+                width: 80,
+                height: 24,
+                sequence_height_bounds: (5..6).into(),
+                sequence_probability: 1.0,
+            };
+
+            let mut col = Column::new(&mut rng, 0, &descriptor);
+            for _ in 0..10 {
+                col.update(&mut rng, &descriptor);
+            }
+
+            let no_sequences_intersect = col
+                .seqs
+                .iter()
+                .map(|seq| (seq.offset..i32::from(seq.height)).collect::<HashSet<_>>())
+                .tuple_combinations()
+                .all(|(a, b)| a.intersection(&b).count() == 0);
+
+            assert!(no_sequences_intersect)
         }
     }
 }
