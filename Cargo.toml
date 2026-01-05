@@ -20,9 +20,9 @@ crossterm = { version = "0.28.1", features = ["serde"] }
 directories = "6.0.0"
 rand = "0.9.0"
 serde_plain = "1.0.2"
-time = { version = "0.3.41", features = ["local-offset"] }
+time = { version = "0.3.44", features = ["local-offset"] }
 tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 
 [dev-dependencies]
 itertools = "0.14.0"
